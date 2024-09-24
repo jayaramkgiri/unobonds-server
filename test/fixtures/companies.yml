@@ -1,0 +1,13 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  cin: MyString
+  name: MyString
+  status: MyString
+  mca_sourced_date: 2024-09-19
+
+two:
+  cin: MyString
+  name: MyString
+  status: MyString
+  mca_sourced_date: 2024-09-19
