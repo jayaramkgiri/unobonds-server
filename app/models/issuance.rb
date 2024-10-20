@@ -26,10 +26,14 @@ class Issuance
   field :issue_price, type: Integer
   field :depository, type: String
   field :perpetual, type: Boolean
+  field :nse_scrip, type: String
+  field :bse_scrip, type: String
+  field :latest_trade_date, type: Date
 
-
+  field :cash_flow_schedule
   field :nsdl_data
   field :nse_data
-
+  field :latest_bse_trade
+  field :latest_nse_trade
 end
 

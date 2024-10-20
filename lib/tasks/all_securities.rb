@@ -46,6 +46,42 @@ module AllSecurity
     end
   end
 
+  def bse_trades(csv_path)
+    trades = CSV.read(csv_path)
+    bse_trades_hash = trades[1..-1].map do |t|
+      {
+        isin: t[8],
+        wap: t[5],
+        way: t[6],
+        turnover: t[7].to_f*100000
+      }
+    end
+    bse_trades_hash.each do |t|
+      iss = Issuance.where(isin: t[:isin]).first
+      next unless iss.present?
+      iss.update_attribute(:latest_bse_trade, t.slice(:wap, :way, :turnover))
+      iss.update_attribute(:latest_trade_date, Date.parse('11-Oct-2024'))
+    end
+  end
+
+  def nse_trades(csv_path)
+    trades = CSV.read(csv_path)
+    nse_trades_hash = trades[1..-1].map do |t|
+      {
+        isin: t[1],
+        wap: t[6],
+        way: t[7],
+        turnover: t[4].to_f*100000
+      }
+    end
+    nse_trades_hash.each do |t|
+      iss = Issuance.where(isin: t[:isin]).first
+      next unless iss.present?
+      iss.update_attribute(:latest_nse_trade, t.slice(:wap, :way, :turnover))
+      iss.update_attribute(:latest_trade_date, Date.parse('11-Oct-2024'))
+    end
+  end
+
   def cin(iss)
     if iss.nsdl_data['ncd']['cin'].present?
       iss.nsdl_data['ncd']['cin']
@@ -79,6 +115,14 @@ module AllSecurity
     else
       @allotment_date_err << iss.isin
       nil
+    end
+  end
+
+  def redemption_date(iss)
+    if( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['redemptionDate'].present? && ( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['redemptionDate'].to_date == iss.nse_data["Date of Redemption/Conversion"].to_date))
+      iss.nse_data["Date of Redemption/Conversion"].to_date
+    else
+      @redemption_date_err << iss.isin
     end
   end
 
@@ -129,18 +173,31 @@ module AllSecurity
     iss.nsdl_data['rating']['currentRatings'].sort_by {|h| h['creditRatingDate'].to_date}.last['creditRatingDate'].to_date
   end
 
+  def day_count_convention(iss)
+    iss.nsdl_data['coupon']['coupensVo']['couponDetails']['dayCountConvention']
+  end
+
+  def interest_frequency(iss)
+    if(iss.nsdl_data['coupon']['coupensVo']['couponDetails']['interestPaymentFrequency'].present? && (iss.nsdl_data['coupon']['coupensVo']['couponDetails']['interestPaymentFrequency'] == iss.nse_data["Frequency of Interest Payment"]))
+      iss.nse_data["Frequency of Interest Payment"]
+    else
+      @interest_frequency_mismatch << iss.isin
+      nil
+    end
+  end
+
 end
 
 
-# Issuance.where(cin: 'NOT A COMPANY').each do |iss|
+# Issuance.all.each do |iss|
 #   begin
-#     company_name = company_name(iss)
-#   if company_name.present?
-#     iss.update_attribute(:company_name, company_name)
+#     interest_frequency = interest_frequency(iss)
+#   if interest_frequency.present?
+#     iss.update_attribute(:interest_frequency, interest_frequency)
 #   end
 #   rescue => e
 #     # p "Error-> #{iss.isin}"
-#     @company_name_err << iss.isin
+#     @interest_frequency_err << iss.isin
 #   end
 # end
 
@@ -163,3 +220,4 @@ end
 #   end
 # end
 
+# iss.nsdl_data['coupon']['coupensVo']['cashFlowScheduleDetails']['cashFlowSchedule']
