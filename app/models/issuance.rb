@@ -22,7 +22,7 @@ class Issuance
   field :day_count_convention, type: String
   field :interest_frequency, type: String
   field :principal_frequency, type: String
-  field :issue_size, type: BigDecimal
+  field :issue_size, type: Float
   field :issue_price, type: Integer
   field :depository, type: String
   field :perpetual, type: Boolean
@@ -35,5 +35,7 @@ class Issuance
   field :nse_data
   field :latest_bse_trade
   field :latest_nse_trade
+
+  belongs_to :company, foreign_key: 'cin'
 end
 

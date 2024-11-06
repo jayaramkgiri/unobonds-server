@@ -1,4 +1,7 @@
 module AllSecurity
+  include FileHelpers
+  include NsdlCrawler
+
   STANDARD_KEYS = ["Sr. No.",
   "ISIN",
   "Name of Issuer",
@@ -20,6 +23,33 @@ module AllSecurity
   "Type of Issuer-Nature",
   "Instrument Status"] 
 
+  KEY_FIELDS = [
+    :cin,
+    :company_name,
+    # :description,
+    # :convertibility,
+    :face_value,
+    :allotment_date,
+    :redemption_date,
+    # :redemption_type,
+    :coupon,
+    :coupon_type,
+    :coupon_basis,
+    :latest_rating,
+    :latest_rating_agency,
+    :latest_rating_date,
+    # :latest_rating_rationale,
+    # :rating_at_issuance,
+    # :rating_agency_at_issuance,
+    :day_count_convention,
+    :interest_frequency,
+    # :principal_frequency,
+    # :issue_size,
+    # :issue_price,
+    # :depository,
+    # :perpetual,
+  ]
+
   def reset_errors
     Issuance.fields.keys - ['_id', 'isin', 'nsdl_data', 'nse_data', 'created_at', 'updated_at'].each do |f|
       instance_variable_set("@#{f}_err", [])
@@ -29,14 +59,34 @@ module AllSecurity
   def parse_all_securities_xl(file_path)
     xlsx = Roo::Spreadsheet.open(file_path)
     sheet = xlsx.sheet(0)
-    headers = sheet.headers.map {|h| h[0]}
-    p "Warning: additional/unknown headers" if (STANDARD_KEYS - headers).present?
     sheet.parse(headers: true)
   end
 
-  def push_to_db(nse_file_path)
-    nse_data = parse_all_securities_xl(nse_file_path)
-    nse_data[1..-1].each do |d|
+  def get_db_upto_date
+    file = download_all_securities_file
+    file_data = parse_all_securities_xl(file.path)
+    if (STANDARD_KEYS - file_data[0].keys).present?
+      p 'Error: file headers has changed'
+    else
+      update_isins(file_data)
+    end
+  end
+
+  def update_isins(file_data)
+    isins = file_data.map {|row| row['ISIN']}
+    existing_isins = Issuance.pluck(:isin)
+    new_isins = isins - existing_isins
+    create_new_isins(new_isins)
+    update_nsdl_data(new_isins)
+    redeemed_isins = existing_isins - isins
+    delete_old_isins(redeemed_isins)
+  end
+
+  def create_new_isins(new_isins, file_data)
+    new_data = file_data.select do |d|
+      d["ISIN"].in? new_isins
+    end
+    new_data.each do |d|
       begin
         iss = Issuance.find_or_create_by!(isin: d['ISIN'])
         iss.update_attribute(:nse_data, d)
@@ -44,6 +94,18 @@ module AllSecurity
         p "Error: Isin -> #{d['ISIN']} -> #{e}"
       end
     end
+  end
+
+  def update_nsdl_data(new_isins)
+    data = nsdl_data(new_isins)
+    data.each do |k,v|
+      Issuance.where(isin: k).first.update_attribute(:nsdl_data, v)
+    end
+    denormalize_key_fields(new_isins)
+  end
+
+  def delete_old_isins(redeemed_isins)
+    Issuance.where(:isin.in => redeemed_isins).destroy_all
   end
 
   def bse_trades(csv_path)
@@ -80,6 +142,10 @@ module AllSecurity
       iss.update_attribute(:latest_nse_trade, t.slice(:wap, :way, :turnover))
       iss.update_attribute(:latest_trade_date, Date.parse('11-Oct-2024'))
     end
+  end
+
+  def denormalize_key_fields(new_isins)
+    iss.cin = 
   end
 
   def cin(iss)
@@ -208,16 +274,5 @@ end
 #   end
 # end
 
-
-
-
-# Issuance.where(:isin.in => data1.keys).each do |iss|
-#   begin
-#   iss.nsdl_data = data1[iss.isin]
-#   iss.save!
-#   rescue => e
-#     p "Error ---> #{iss.isin}"
-#   end
-# end
 
 # iss.nsdl_data['coupon']['coupensVo']['cashFlowScheduleDetails']['cashFlowSchedule']

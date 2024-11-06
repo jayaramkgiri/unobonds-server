@@ -7,10 +7,10 @@ class Yield
   AAA_RATING = ['AAA', 'AAA+','AAA-']
   BBB_RATING = ['BBB', 'BBB+','BBB-']
 
-  field :a_yield, type: BigDecimal
-  field :aa_yield, type: BigDecimal
-  field :aaa_yield, type: BigDecimal
-  field :bbb_yield, type: BigDecimal
+  field :a_yield, type: Float
+  field :aa_yield, type: Float
+  field :aaa_yield, type: Float
+  field :bbb_yield, type: Float
   field :calculated_date, type: Date
 
   class << self
