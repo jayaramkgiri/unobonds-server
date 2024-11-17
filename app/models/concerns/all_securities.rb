@@ -108,24 +108,6 @@ module AllSecurity
     Issuance.where(:isin.in => redeemed_isins).destroy_all
   end
 
-  def bse_trades(csv_path)
-    trades = CSV.read(csv_path)
-    bse_trades_hash = trades[1..-1].map do |t|
-      {
-        isin: t[8],
-        wap: t[5],
-        way: t[6],
-        turnover: t[7].to_f*100000
-      }
-    end
-    bse_trades_hash.each do |t|
-      iss = Issuance.where(isin: t[:isin]).first
-      next unless iss.present?
-      iss.update_attribute(:latest_bse_trade, t.slice(:wap, :way, :turnover))
-      iss.update_attribute(:latest_trade_date, Date.parse('11-Oct-2024'))
-    end
-  end
-
   def nse_trades(csv_path)
     trades = CSV.read(csv_path)
     nse_trades_hash = trades[1..-1].map do |t|

@@ -29,10 +29,16 @@ gem "bootsnap", require: false
 
 gem 'mongoid'
 gem  'faraday'
+gem 'smarter_csv'
+gem 'brotli'
 
 gem "roo", "~> 2.10.0"
 
 gem 'levenshtein'
+gem 'business_time'
+
+gem 'capybara'
+gem 'selenium-webdriver'
 
 # Use Rack CORS for handling Cross-Origin Resource Sharing (CORS), making cross-origin AJAX possible
 # gem "rack-cors"
