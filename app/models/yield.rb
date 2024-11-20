@@ -7,44 +7,48 @@ class Yield
   AAA_RATING = ['AAA', 'AAA+','AAA-']
   BBB_RATING = ['BBB', 'BBB+','BBB-']
 
+  TENOR_BUCKETS = {
+    '0-3' => [0,3],
+    '3-5' => [3,5],
+    '5-10' => [5,10],
+    '10+' => [10, 99]
+  }
+
   field :a_yield, type: Float
   field :aa_yield, type: Float
   field :aaa_yield, type: Float
   field :bbb_yield, type: Float
   field :calculated_date, type: Date
+  field :tenor_bucket, type: String
 
   class << self
-    def create_yields
-      return if self.where(calculated_date:  Date.today).count > 0
-      self.create(
-          calculated_date: Date.today,
-          a_yield: calculate_yield(A_RATING),
-          aa_yield: calculate_yield(AA_RATING),
-          aaa_yield: calculate_yield(AAA_RATING),
-          bbb_yield: calculate_yield(BBB_RATING)
-        )
+    def create_latest_yields(period)
+      latest_trade_date = OtcTrade.latest_trade_date
+      return if self.where(calculated_date: latest_trade_date).count > 0
+      TENOR_BUCKETS.keys.each do |tenor|
+        self.create(
+            calculated_date: latest_trade_date,
+            tenor_bucket: tenor,
+            a_yield: calculate_yield(A_RATING, tenor, period),
+            aa_yield: calculate_yield(AA_RATING, tenor, period),
+            aaa_yield: calculate_yield(AAA_RATING, tenor, period),
+            bbb_yield: calculate_yield(BBB_RATING, tenor, period)
+          )
+      end
     end
 
-    def calculate_yield(rating)
+    def calculate_yield(rating, tenor, period)
       price_turnover_product=0
       turnover_sum=0
-      recently_traded_issuances.where(:latest_rating.in => rating).each do |iss|
-        if iss.latest_nse_trade.present?
-          price_turnover_product = price_turnover_product +(iss.latest_nse_trade['turnover'] * iss.latest_nse_trade['way'].to_f / 100)
-          turnover_sum = turnover_sum + iss.latest_nse_trade['turnover']
-        end
-        if iss.latest_bse_trade.present?
-          price_turnover_product = price_turnover_product +(iss.latest_bse_trade['turnover'] * iss.latest_bse_trade['way'].to_f / 100)
-          turnover_sum = turnover_sum + iss.latest_bse_trade['turnover']
-        end
+      OtcTrade.latest_trades(period).maturing_in(TENOR_BUCKETS[tenor][0].year, TENOR_BUCKETS[tenor][1].year).where(:latest_rating.in => rating).each do |iss|
+        price_turnover_product = price_turnover_product + (iss.turnover * iss.weighted_average_yield / 100)
+        turnover_sum = turnover_sum + iss.turnover
       end
-      price_turnover_product/turnover_sum*100
-    end
-
-
-
-    def recently_traded_issuances
-      Issuance.where(:latest_trade_date.gt => Date.today - 1.month, :latest_rating_date.gt => Date.parse('01-01-2023') )
+      if turnover_sum > 0
+        (price_turnover_product / turnover_sum * 100).round(2)
+      else
+        0
+      end
     end
   end
 end

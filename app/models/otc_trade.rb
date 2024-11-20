@@ -15,8 +15,16 @@ class OtcTrade
   field :bse_data
   field :nse_data
 
+  scope :latest_trades, ->(period) {where(:date.gt => (OtcTrade.latest_trade_date - period))}
+  scope :maturing_in, ->(start_period, end_period) {where(:redemption_date.lt => (OtcTrade.latest_trade_date + end_period), :redemption_date.gte => (OtcTrade.latest_trade_date + start_period))}
+
   class << self
     ISSUANCE_FIELDS = ['latest_rating', 'latest_rating_agency', 'latest_rating_date', 'allotment_date', 'redemption_date']
+
+    def latest_trade_date
+      OtcTrade.order_by(date: :desc).first.date
+    end
+
 
     def pull_trades(date = Date.yesterday)
       if trades_already_exists?(date)
@@ -24,7 +32,14 @@ class OtcTrade
       else
         pull_bse_trades(date)
         pull_nse_trades(date)
-        update_other_fields(date)
+        update_top_fields(date)
+      end
+    end
+
+    def update_top_fields(date)
+      OtcTrade.where(date: date).each do |tr|
+        tr.calc_top_fields
+        tr.save!
       end
     end
 
@@ -83,6 +98,22 @@ class OtcTrade
 
     def trades_already_exists?(date)
       self.where(date: date).count > 0
+    end
+  end
+
+  def calc_top_fields
+    if bse_data.nil?
+      self.weighted_average_price = nse_data[:weighted_average_price] 
+      self.weighted_average_yield = nse_data[:weighted_average_yield] 
+      self.turnover = nse_data[:turnover]
+    elsif nse_data.nil?
+      self.weighted_average_price = bse_data[:weighted_average_price] 
+      self.weighted_average_yield = bse_data[:weighted_average_yield] 
+      self.turnover = bse_data[:turnover]
+    else
+      self.weighted_average_price = bse_data[:weighted_average_price] > nse_data[:weighted_average_price]  ? bse_data[:weighted_average_price] : nse_data[:weighted_average_price]
+      self.weighted_average_yield = bse_data[:weighted_average_yield] > nse_data[:weighted_average_yield]  ? bse_data[:weighted_average_yield] : nse_data[:weighted_average_yield]
+      self.turnover = bse_data[:turnover] + nse_data[:turnover]
     end
   end
 end
