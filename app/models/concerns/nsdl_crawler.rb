@@ -78,5 +78,6 @@ module NsdlCrawler
         err_isins << isin
       end
     end
+    data
   end
 end

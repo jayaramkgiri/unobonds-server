@@ -1,6 +1,7 @@
 module AllSecurity
   include FileHelpers
   include NsdlCrawler
+  include IssuanceRatings
 
   STANDARD_KEYS = ["Sr. No.",
   "ISIN",
@@ -23,38 +24,37 @@ module AllSecurity
   "Type of Issuer-Nature",
   "Instrument Status"] 
 
-  KEY_FIELDS = [
-    :cin,
-    :company_name,
-    # :description,
-    # :convertibility,
-    :face_value,
-    :allotment_date,
-    :redemption_date,
-    # :redemption_type,
-    :coupon,
-    :coupon_type,
-    :coupon_basis,
-    :latest_rating,
-    :latest_rating_agency,
-    :latest_rating_date,
-    # :latest_rating_rationale,
-    # :rating_at_issuance,
-    # :rating_agency_at_issuance,
-    :day_count_convention,
-    :interest_frequency,
-    # :principal_frequency,
-    # :issue_size,
-    # :issue_price,
-    # :depository,
-    # :perpetual,
-  ]
+  FETCH_ATTRIBUTES=['cin',
+  'company_name',
+  'face_value',
+  'allotment_date',
+  'redemption_date',
+  'coupon_basis',
+  'coupon',
+  'coupon_type',
+  'latest_rating',
+  'latest_rating_agency',
+  'latest_rating_date',
+  'day_count_convention',
+  'interest_frequency']
 
-  def reset_errors
-    Issuance.fields.keys - ['_id', 'isin', 'nsdl_data', 'nse_data', 'created_at', 'updated_at'].each do |f|
-      instance_variable_set("@#{f}_err", [])
-    end
-  end
+  KEY_FIELDS = ["cin",
+    "company_name",
+    "description",
+    "face_value",
+    "allotment_date",
+    "redemption_date",
+    "coupon",
+    "coupon_type",
+    "coupon_basis",
+    "latest_rating",
+    "latest_rating_agency",
+    "latest_rating_date",
+    "latest_rating_rationale",
+    "day_count_convention",
+    "interest_frequency",
+    "issue_size",
+    "perpetual"] 
 
   def parse_all_securities_xl(file_path)
     xlsx = Roo::Spreadsheet.open(file_path)
@@ -64,7 +64,7 @@ module AllSecurity
 
   def get_db_upto_date
     file = download_all_securities_file
-    file_data = parse_all_securities_xl(file.path)
+    @file_data = parse_all_securities_xl(file.path)
     if (STANDARD_KEYS - file_data[0].keys).present?
       p 'Error: file headers has changed'
     else
@@ -72,8 +72,8 @@ module AllSecurity
     end
   end
 
-  def update_isins(file_data)
-    isins = file_data.map {|row| row['ISIN']}
+  def update_isins
+    isins = @file_data[1..-1].map {|row| row['ISIN']}
     existing_isins = Issuance.pluck(:isin)
     new_isins = isins - existing_isins
     create_new_isins(new_isins)
@@ -82,8 +82,8 @@ module AllSecurity
     delete_old_isins(redeemed_isins)
   end
 
-  def create_new_isins(new_isins, file_data)
-    new_data = file_data.select do |d|
+  def create_new_isins(new_isins)
+    new_data = @file_data.select do |d|
       d["ISIN"].in? new_isins
     end
     new_data.each do |d|
@@ -108,153 +108,202 @@ module AllSecurity
     Issuance.where(:isin.in => redeemed_isins).destroy_all
   end
 
-  def nse_trades(csv_path)
-    trades = CSV.read(csv_path)
-    nse_trades_hash = trades[1..-1].map do |t|
-      {
-        isin: t[1],
-        wap: t[6],
-        way: t[7],
-        turnover: t[4].to_f*100000
-      }
-    end
-    nse_trades_hash.each do |t|
-      iss = Issuance.where(isin: t[:isin]).first
-      next unless iss.present?
-      iss.update_attribute(:latest_nse_trade, t.slice(:wap, :way, :turnover))
-      iss.update_attribute(:latest_trade_date, Date.parse('11-Oct-2024'))
-    end
-  end
-
   def denormalize_key_fields(new_isins)
-    iss.cin = 
+    @fetch_errors = {}
+    @failed_isins = []
+    KEY_FIELDS.each {|att| @fetch_errors[att.to_sym] = []}
+    Issuance.where(:isin.in => new_isins).each do |iss|
+      begin
+        KEY_FIELDS.each do |att|
+          iss.send("#{att}=", send("fetch_#{att}", iss))
+        end
+        iss.save!
+      rescue => e
+        p "Failed to save #{iss.isin}"
+        @failed_isins << iss.isin
+      end
+    end
+    p @fetch_errors 
   end
 
-  def cin(iss)
+  def fetch_cin(iss)
     if iss.nsdl_data['ncd']['cin'].present?
       iss.nsdl_data['ncd']['cin']
+    elsif fetch_company_name(iss).present? && Company.where(name: fetch_company_name(iss)).present?
+      Company.where(name: fetch_company_name(iss)).first.cin
     else
-      @cin_err << iss.isin
+      @fetch_errors[:cin] << iss.isin
       nil
     end
   end
 
-  def company_name(iss)
+  def fetch_company_name(iss)
     if iss.nsdl_data['ncd']['issuerName'].present? && (iss.nse_data['Name of Issuer'].upcase.strip == iss.nsdl_data['ncd']['issuerName'].upcase.strip)
       iss.nse_data['Name of Issuer'].upcase.strip
     else
-      @company_name_err << iss.isin
+      @fetch_errors[:company_name] << iss.isin
       nil
     end
   end
 
-  def face_value(iss)
+  def fetch_face_value(iss)
     if(iss.nse_data['Face Value(in Rs.)'].present? && (iss.nse_data['Face Value(in Rs.)'].to_i == iss.nsdl_data['instruments']['instrumentsVo']['instruments']['faceValue'].to_i))
       iss.nse_data['Face Value(in Rs.)'].to_i
     else
-      @face_value_err << iss.isin
+      @fetch_errors[:face_value] << iss.isin
       nil
     end
   end
 
-  def allotment_date(iss)
+  def fetch_allotment_date(iss)
     if( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['allotmentDate'].present? && ( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['allotmentDate'].to_date == iss.nse_data['Date of Allotment'].to_date))
       iss.nse_data['Date of Allotment'].to_date
     else
-      @allotment_date_err << iss.isin
+      @fetch_errors[:allotment_date] << iss.isin
       nil
     end
   end
 
-  def redemption_date(iss)
+  def fetch_redemption_date(iss)
     if( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['redemptionDate'].present? && ( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['redemptionDate'].to_date == iss.nse_data["Date of Redemption/Conversion"].to_date))
       iss.nse_data["Date of Redemption/Conversion"].to_date
     else
-      @redemption_date_err << iss.isin
+      @fetch_errors[:redemption_date] << iss.isin
     end
   end
 
-  def redemption_date(iss)
-    if( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['redemptionDate'].present? && ( iss.nsdl_data['instruments']['instrumentsVo']['instruments']['redemptionDate'].to_date == iss.nse_data["Date of Redemption/Conversion"].to_date))
-      iss.nse_data["Date of Redemption/Conversion"].to_date
-    else
-      @redemption_date_err << iss.isin
-    end
-  end
-
-  def coupon(iss)
+  def fetch_coupon(iss)
     if(iss.nsdl_data['coupon']['coupensVo']['couponDetails']['couponRate'].present? && (iss.nsdl_data['coupon']['coupensVo']['couponDetails']['couponRate'].to_f == iss.nse_data["Coupon Rate (%)"].to_f))
       iss.nse_data["Coupon Rate (%)"].to_f
     else
-      @coupon_err << iss.isin
+      @fetch_errors[:coupon] << iss.isin
       nil
     end
   end
 
-  def coupon_type(iss)
+  def fetch_coupon_type(iss)
     if(iss.nsdl_data['coupon']['coupensVo']['couponDetails']['couponType'].present? && (iss.nsdl_data['coupon']['coupensVo']['couponDetails']['couponType'] == iss.nse_data["Coupon Type"]))
       iss.nse_data["Coupon Type"]
     else
-      @coupon_type_err << iss.isin
+      @fetch_errors[:coupon_type] << iss.isin
       nil
     end
   end
 
-  def coupon_basis(iss)
+  def fetch_coupon_basis(iss)
     if(iss.nsdl_data['coupon']['coupensVo']['couponDetails']['couponBasis'].present?)
       iss.nsdl_data['coupon']['coupensVo']['couponDetails']['couponBasis']
     else
-      @coupon_basis_err << iss.isin
+      @fetch_errors[:coupon_basis] << iss.isin
       nil
     end
   end
 
-  def latest_rating(iss)
-      iss.nsdl_data['rating']['currentRatings'].sort_by {|h| h['creditRatingDate'].to_date}.last['currentRating']
+  def fetch_latest_rating(iss)
+    if iss.nsdl_data['rating']['currentRatings'].present?
+      lr = iss.nsdl_data['rating']['currentRatings'].sort_by do |h|
+        begin
+          h['creditRatingDate'].to_date
+        rescue => _e
+          iss.allotment_date
+        end
+      end.last['currentRating']
+      map_rating(lr)
+    else
+      @fetch_errors[:latest_rating] << iss.isin
+      nil
+    end
   end
 
-  def latest_rating_agency(iss)
-    iss.nsdl_data['rating']['currentRatings'].sort_by {|h| h['creditRatingDate'].to_date}.last['creditRatingAgencyName']
+  def fetch_latest_rating_agency(iss)
+    if iss.nsdl_data['rating']['currentRatings'].present?
+      la= iss.nsdl_data['rating']['currentRatings'].sort_by do |h|
+        begin
+          h['creditRatingDate'].to_date
+        rescue => _e
+          iss.allotment_date
+        end
+      end.last['creditRatingAgencyName']
+      map_agency(la)
+    else
+      @fetch_errors[:latest_rating_agency] << iss.isin
+      nil
+    end
   end
 
-  def latest_rating_date(iss)
-    iss.nsdl_data['rating']['currentRatings'].sort_by {|h| h['creditRatingDate'].to_date}.last['creditRatingDate'].to_date
+  def fetch_latest_rating_date(iss)
+    if iss.nsdl_data['rating']['currentRatings'].present?
+      iss.nsdl_data['rating']['currentRatings'].sort_by do |h|
+        begin
+          h['creditRatingDate'].to_date
+        rescue => _e
+          iss.allotment_date
+        end
+      end.last['creditRatingDate'].to_date
+    else
+      @fetch_errors[:latest_rating_date] << iss.isin
+      nil
+    end
   end
 
-  def day_count_convention(iss)
-    iss.nsdl_data['coupon']['coupensVo']['couponDetails']['dayCountConvention']
+  def fetch_day_count_convention(iss)
+    if iss.nsdl_data['coupon'] && iss.nsdl_data['coupon']['coupensVo'] && iss.nsdl_data['coupon']['coupensVo']['couponDetails'] && iss.nsdl_data['coupon']['coupensVo']['couponDetails']['dayCountConvention']
+      iss.nsdl_data['coupon']['coupensVo']['couponDetails']['dayCountConvention']
+    else
+      @fetch_errors[:day_count_convention] << iss.isin
+      nil
+    end
   end
 
-  def interest_frequency(iss)
+  def fetch_interest_frequency(iss)
     if(iss.nsdl_data['coupon']['coupensVo']['couponDetails']['interestPaymentFrequency'].present? && (iss.nsdl_data['coupon']['coupensVo']['couponDetails']['interestPaymentFrequency'] == iss.nse_data["Frequency of Interest Payment"]))
       iss.nse_data["Frequency of Interest Payment"]
     else
-      @interest_frequency_mismatch << iss.isin
+      @fetch_errors[:interest_frequency] << iss.isin
       nil
     end
   end
 
+  def fetch_description(iss)
+    if iss.nsdl_data['instruments']['instrumentsVo']['instruments']['instrumentDesc'].present?
+      iss.nsdl_data['instruments']['instrumentsVo']['instruments']['instrumentDesc']
+    else
+      @fetch_errors[:description] << iss.isin
+    end
+  end
+
+  def fetch_latest_rating_rationale(iss)
+    if iss.nsdl_data['rating']['currentRatings'].present?
+      iss.nsdl_data['rating']['currentRatings'].sort_by do |h|
+        begin
+          h['creditRatingDate'].to_date
+        rescue => _e
+          iss.allotment_date
+        end
+      end.last['pressReleaseLink']
+    else
+      @fetch_errors[:latest_rating_rationale] << iss.isin
+      nil
+    end
+  end
+
+  def fetch_issue_size(iss)
+    if iss.nsdl_data['instruments']['instrumentsVo']['instruments']['totalIssueSize'].present?
+      iss.nsdl_data['instruments']['instrumentsVo']['instruments']['totalIssueSize'].to_i
+    else
+      @fetch_errors[:issue_size] << iss.isin
+    end
+  end
+
+  def fetch_perpetual(iss)
+    if iss.nsdl_data['instruments']['instrumentsVo']['instruments']['perpetualInNature'].present?
+      iss.nsdl_data['instruments']['instrumentsVo']['instruments']['perpetualInNature'] == "Yes" ? true : false 
+    else
+      @fetch_errors[:perpetual] << iss.isin
+    end
+  end
 end
 
-
-# Issuance.all.each do |iss|
-#   begin
-#     interest_frequency = interest_frequency(iss)
-#   if interest_frequency.present?
-#     iss.update_attribute(:interest_frequency, interest_frequency)
-#   end
-#   rescue => e
-#     # p "Error-> #{iss.isin}"
-#     @interest_frequency_err << iss.isin
-#   end
-# end
-
-
-# Issuance.where(:latest_rating_agency.ne => nil ).each do |iss|
-#   if agency_map.keys.include?(iss.latest_rating_agency)
-#     iss.update_attribute(:latest_rating_agency, agency_map[iss.latest_rating_agency])
-#   end
-# end
 
 
 # iss.nsdl_data['coupon']['coupensVo']['cashFlowScheduleDetails']['cashFlowSchedule']

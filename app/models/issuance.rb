@@ -1,6 +1,10 @@
 class Issuance
   include Mongoid::Document
   include Mongoid::Timestamps
+
+  extend IssuanceReplenish
+  include FetchAttrHelpers
+
   field :isin, type: String
   field :cin, type: String
   field :company_name, type: String
@@ -36,6 +40,8 @@ class Issuance
   field :latest_bse_trade
   field :latest_nse_trade
 
-  belongs_to :company, foreign_key: 'cin'
+  belongs_to :company, foreign_key: 'cin', optional: true
+
+
 end
 

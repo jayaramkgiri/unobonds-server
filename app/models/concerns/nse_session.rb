@@ -5,9 +5,10 @@ require 'capybara/dsl'
 class NseSession
   include Capybara::DSL
 
-  def initialize
+  def initialize(url)
     # Configure Capybara to use Selenium with Chrome
     Capybara.default_driver = :selenium_chrome
+    load_page(url)
   end
 
   def load_page(url)
@@ -20,6 +21,8 @@ class NseSession
     cookies.each do |cookie|
       puts "Cookie: #{cookie[:name]} = #{cookie[:value]}"
     end
+    close_browser
+    cookies
   end
 
   def close_browser
