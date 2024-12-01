@@ -1,8 +1,9 @@
 module IssuanceReplenish
   include NsdlCrawler
   include IssuanceRatings
+  include ScripCrawlers
 
-  attr_accessor :new_isins, :denormalize_err_isins, :redeemed_isins, :file_data
+  attr_accessor :new_isins, :denormalize_err_isins, :redeemed_isins, :file_data, :bse_scrips, :nse_scrips, :nsdl
 
   STANDARD_KEYS = ["Sr. No.",
   "ISIN",
@@ -69,32 +70,42 @@ module IssuanceReplenish
       @new_isins = isins - existing_isins
       @redeemed_isins = existing_isins - isins
       create_new_isins
-      update_nsdl_data
       denormalize_key_fields
       delete_old_isins
     end
 
     def create_new_isins
+      fetch_scrips
+      fetch_nsdl_data
       new_data = file_data.select do |d|
         d["ISIN"].in? new_isins
       end
       p "Creating #{new_isins.count} Isins"
+      @err_creating = []
       new_data.each do |d|
         begin
-          iss = Issuance.find_or_create_by!(isin: d['ISIN'])
-          iss.update_attribute(:nse_data, d)
+          isin = d['ISIN']
+          iss = Issuance.find_or_create_by!(isin: isin)
+          iss.nsdl_data = nsdl[isin]
+          iss.bse_scrip = bse_scrips[isin] if bse_scrips[isin].present?
+          iss.nse_scrip = nse_scrips[isin] if nse_scrips[isin].present?
+          iss.nse_data = d
+          iss.save!
         rescue => e
-          p "Error: Isin -> #{d['ISIN']} -> #{e}"
+          p "ISIN #{isin} --> #{e}"
+          @err_creating << isin
         end
       end
+      p "Error Creating ISINS -> #{@err_creating }"
     end
 
-    def update_nsdl_data
-      data = nsdl_data(new_isins)
-      p "Updating NSDL data for new Isins"
-      data.each do |k,v|
-        Issuance.where(isin: k).first.update_attribute(:nsdl_data, v)
-      end
+    def fetch_scrips
+      @bse_scrips = fetch_bse_scrip(new_isins)
+      @nse_scrips = fetch_nse_scrip(new_isins)
+    end
+
+    def fetch_nsdl_data
+      @nsdl = nsdl_data(new_isins)
     end
 
     def denormalize_key_fields

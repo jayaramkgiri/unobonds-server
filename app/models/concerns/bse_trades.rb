@@ -29,9 +29,10 @@ class BseTrades
     visit('https://www.bseindia.com/markets/debt/debt_corporate_EOD.aspx')
     @last_page = fetch_last_page
     @trades = []
+    @formatted_output={}
   end
 
-  def fetch_all_trades
+  def fetch_trade_list
     (1..@last_page).to_a.each do |page_no|
       begin
         fetch_trades(page_no)
@@ -40,7 +41,14 @@ class BseTrades
       end
     end
     close_browser
-    @trades
+    format_trades
+  end
+
+  def format_trades
+    @trades.each do |t|
+      @formatted_output[t['security_info']['ISSebiIsin']] = t
+    end
+    @formatted_output
   end
 
   def fetch_last_page
@@ -66,6 +74,7 @@ class BseTrades
   def extract_data
     validate_headers
     data = page.find(:css, 'table#ContentPlaceHolder1_GridViewrcdsFC').all('tr')[1..-3].map do |row|
+      sleep(3)
       trade_hash(row)
     end
     @trades = @trades + data
@@ -92,7 +101,11 @@ class BseTrades
   end
 
 
-  def market_depth(code)
+  def market_depth(code, retry_count = 1)
+    if retry_count > 10
+      p "Error fetching security info for #{code} after Retries"
+      return nil
+    end
     begin
       url = "https://api.bseindia.com/RealTimeBseIndiaAPI/api/MarketDepth/w?flag=&quotetype=EQ&scripcode=#{code}"
       uri = URI.parse(url)
@@ -116,16 +129,24 @@ class BseTrades
       if response.is_a?(Net::HTTPSuccess)
         JSON.parse(response.body)
       else
+        sleep(5 * retry_count)
         p "Error fetching market depth for #{code} --> API returned with code #{response.message}"
-        nil
+        p "Retrying ..."
+        return security_info(code, retry_count + 1)
       end
     rescue => e
+      sleep(5 * retry_count)
       p "Error fetching market depth for #{code} --> #{e}"
-      nil
+      p "Retrying ..."
+      return security_info(code, retry_count + 1)
     end
   end
 
-  def security_info(code)
+  def security_info(code, retry_count = 1)
+    if retry_count > 10
+      p "Error fetching security info for #{code} after Retries"
+      return nil
+    end
     begin
       url = "https://api.bseindia.com/BseIndiaAPI/api/DebSecurityInfo/w?scripcode=#{code}"
       uri = URI.parse(url)
@@ -149,12 +170,16 @@ class BseTrades
       if response.is_a?(Net::HTTPSuccess)
         JSON.parse(response.body)['Table'][0]
       else
+        sleep(5 * retry_count)
         p "Error fetching security info for #{code} --> API returned with code #{response.message}"
-        nil
+        p "Retrying ..."
+        return security_info(code, retry_count + 1)
       end
     rescue => e
+      sleep(5 * retry_count)
       p "Error fetching security info for #{code} --> #{e}"
-      nil
+      p "Retrying ..."
+      return security_info(code, retry_count + 1)
     end
   end
 

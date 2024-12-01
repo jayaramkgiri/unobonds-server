@@ -35,9 +35,9 @@ class NseTrades
       request['cookie'] = "nsit=#{ cookies.find {|c| c[:name] == 'nsit'}[:value]}; nseappid=#{cookies.find {|c| c[:name] == 'nseappid'}[:value]}"
       response = http.request(request)
       if response.is_a?(Net::HTTPSuccess)
-        JSON.parse(Brotli.inflate(response.body))
+        augment_response JSON.parse(Brotli.inflate(response.body))
       else
-        p "Error fetching Trade list. ApI responded with #{response.message}"
+        p "Error fetching Trade list. API responded with #{response.message}"
         nil
       end
     rescue => e
@@ -46,7 +46,16 @@ class NseTrades
     end
   end
 
-  def fetch_market_depth(symbol)
+  def augment_response(response)
+    trade_hash = {}
+    response['data'].each do |d|
+      d['market_depth'] = fetch_market_depth(d['symbol'], 'series')
+      trade_hash[d['meta']['isin']] = d
+    end
+    trade_hash
+  end
+
+  def fetch_market_depth(symbol, series)
     begin 
       url = "https://www.nseindia.com/api/quote-bonds?index=#{symbol}"
       uri = URI.parse(url)
@@ -71,19 +80,23 @@ class NseTrades
       request['sec-fetch-mode'] = 'cors'
       request['sec-fetch-site'] = 'same-site'
       request['user-agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
-      request['cookie'] = "nsit=#{cookies.find {|c| c[:name] == 'nsit'}[:value]}; nseappid=#{cookies.find {|c| c[:name] == 'nseappid'}[:value]}"
+      request['cookie'] = "nsit=#{@cookies.find {|c| c[:name] == 'nsit'}[:value]}; nseappid=#{@cookies.find {|c| c[:name] == 'nseappid'}[:value]}"
       response = http.request(request)
       if response.is_a?(Net::HTTPSuccess)
-        JSON.parse(Brotli.inflate(response.body))
+        extract_series_data JSON.parse(Brotli.inflate(response.body)), symbol, series
       else
-        p "Error fetching Trade list. ApI responded with #{response.message}"
+        p "Error fetching Market depth for #{symbol} #{series}. ApI responded with #{response.message}"
         nil
       end
     rescue => e
-      p "Error fetching Trade list. Error --> #{e}"
+      p "Error fetching Market depth for #{symbol} #{series}. Error --> #{e}"
       nil
     end
   end
 
-
+  def extract_series_data(response, symbol, series)
+    response['data'].find do |d|
+      d['allSecurities']['symbol'] == symbol && d['allSecurities']['series']
+    end
+  end
 end
