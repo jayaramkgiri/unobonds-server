@@ -45,21 +45,28 @@ class Market
   field :close, type: Float
   field :total_buy_order, type: Integer
   field :total_sell_order, type: Integer
-  field :buyPrice, type: Float
-  field :sellPrice, type: Float
+  field :buy_price, type: Float
+  field :sell_price, type: Float
+  field :buy_volume, type: Float
+  field :sell_volume, type: Float
+
+  field :market_depth
 
   field :bse_scrape
   field :nse_scrape
 
   class << self
 
+    attr_accessor :latest_version
+
     def update_marketdata
+      fetch_latest_version
       update_nse_data
       update_bse_data
-      populate_common_fields
     end
 
-    def populate_common_fields
+    def fetch_latest_version
+      @latest_version = Market.where(date: Date.today).distinct(:version).sort.last
     end
 
     def update_bse_data
@@ -67,12 +74,16 @@ class Market
       today = Date.today
       err_isins = []
       p "Updating BSE Scrape"
-      Issuance.where(:isin.in => bse_scrape.keys.compact).each do |iss|
+      fix_bse_missing_scrips(bse_scrape.keys)
+      Issuance.where(:bse_scrip.in => bse_scrape.keys.compact).each do |iss|
         begin
           market_entry = Market.where(isin: iss.isin, date: today).first
           market_entry = Market.new(isin: iss.isin, date: today) unless market_entry.present?
           assign_iss_attributes(iss, market_entry) if market_entry.new_record?
-          market_entry.bse_scrape = bse_scrape[iss.isin]
+          market_entry.version = latest_version + 1 unless market_entry.new_record?
+          market_entry.bse_scrape = bse_scrape[iss.bse_scrip]
+          market_entry.populate_market
+          market_entry.populate_market_depth
           market_entry.save!
         rescue => e
           p "Failed to save BSE market data for #{iss.isin} -> #{e}"
@@ -86,6 +97,12 @@ class Market
       end
     end
 
+    def fix_bse_missing_scrips(scrips)
+      missing_scrips = (scrips - Issuance.where(:bse_scrip.in => scrips.compact).pluck(:bse_scrip))
+      p "Missing scrips #{missing_scrips}"
+      find_and_update_bse_scrips(scrips)
+    end
+
     def update_nse_data
       nse_scrape = NseTrades.new.fetch_trade_list
       today = Date.today
@@ -96,6 +113,7 @@ class Market
           market_entry = Market.where(isin: iss.isin, date: today).first
           market_entry = Market.new(isin: iss.isin, date: today) unless market_entry.present?
           assign_iss_attributes(iss, market_entry) if market_entry.new_record?
+          market_entry.version = latest_version + 1 unless market_entry.new_record?
           market_entry.nse_scrape = nse_scrape[iss.isin]
           market_entry.save!
         rescue => e
@@ -115,6 +133,129 @@ class Market
         iss_value = iss.send(f)
         market_entry.send("#{f}=", iss_value)
       end
+      market_entry.version = 1
     end
+  end
+
+  def fetch_bse_buy_depth
+    depth = []
+    prices = bse_scrape['market_depth'].select {|k,v| k.include?("BPrice")}.values.try(:map) do |v|
+      v.gsub(',', '').gsub('-','').to_f
+    end.compact
+    qty =  bse_scrape['market_depth'].select {|k,v| k.include?("BQty")}.values.try(:map) do |v|
+      v.gsub(',', '').gsub('-','').to_i
+    end.compact
+    return depth if !prices.present? || !qty.present?
+    prices.each_with_index do |p, i|
+      depth << {'price' => p, 'quantity' => qty[i]}
+    end
+    depth
+  end
+
+  def fetch_bse_sell_depth
+    depth = []
+    prices = bse_scrape['market_depth'].select {|k,v| k.include?("SPrice")}.values.try(:map) do |v|
+      v.gsub(',', '').gsub('-','').to_f
+    end.compact
+    qty =  bse_scrape['market_depth'].select {|k,v| k.include?("SQty")}.values.try(:map) do |v|
+      v.gsub(',', '').gsub('-','').to_i
+    end.compact
+    return depth if !prices.present? || !qty.present?
+    prices.each_with_index do |p, i|
+      depth << {'price' => p, 'quantity' => qty[i]}
+    end
+    depth
+  end
+
+  def fetch_nse_buy_depth
+    nse_scrape['market_depth']['marketDeptOrderBook']['bid'] || []
+  end
+
+  def fetch_nse_sell_depth
+    nse_scrape['market_depth']['marketDeptOrderBook']['ask'] || []
+  end
+
+  def populate_market_depth
+    depth = {'bse' => {}, 'nse'=> {}}
+    if bse_scrape.present?
+      depth['bse']['buy'] = fetch_bse_buy_depth
+      depth['bse']['sell'] = fetch_bse_sell_depth
+    end
+    if nse_scrape.present?
+      depth['nse']['buy'] = fetch_nse_buy_depth
+      depth['nse']['sell'] = fetch_nse_sell_depth
+    end
+    self.market_depth = depth
+  end
+
+  def populate_market
+    market = {}
+    if nse_scrape.nil?
+      market = fetch_bse_market if nse_scrape.nil?
+    elsif bse_scrape.nil?
+      market = fetch_nse_market
+    else
+      market = compare_market(fetch_bse_market, fetch_nse_market)
+    end
+    market.keys.each do |k|
+      self.send("#{k}=", market[k])
+    end
+  end
+
+  def compare_market(bse, nse)
+    {
+      open: (bse[:open] > nse[:open] ? bse[:open] : nse[:open]),
+      close: (bse[:close] > nse[:close] ? bse[:close] : nse[:close]),
+      total_buy_order: (bse[:total_buy_order] + nse[:total_buy_order]),
+      total_sell_order: (bse[:total_sell_order] + nse[:total_sell_order]),
+      buy_price: (bse[:buy_price].to_f > nse[:buy_price].to_f ? bse[:buy_price] : nse[:buy_price]),
+      sell_price: (bse[:sell_price].to_f > nse[:sell_price].to_f ? bse[:sell_price] : nse[:sell_price]),
+      buy_volume: (bse[:buy_volume] + nse[:buy_volume]),
+      sell_volume: (bse[:sell_volume] + nse[:sell_volume]),
+    }
+  end
+
+  def fetch_bse_market
+    buy_price = bse_buy_price
+    sell_price = bse_buy_price
+    {
+      open: bse_scrape['open'].to_f,
+      close: bse_scrape['close'].to_f,
+      total_buy_order: bse_scrape['market_depth']['TotalBQty'].to_i,
+      total_sell_order: bse_scrape['market_depth']['TotalSQty'].to_i,
+      buy_price: buy_price,
+      sell_price: sell_price,
+      buy_volume: bse_scrape['market_depth']['TotalBQty'].to_i * buy_price.to_f,
+      sell_volume: bse_scrape['market_depth']['TotalSQty'].to_i * sell_price.to_f
+    }
+  end
+
+  def bse_buy_price
+    value = bse_scrape['market_depth'].select {|k,v| k.include?("BPrice")}.values.try(:map) do |v|
+      v.gsub(',', '').gsub('-','').to_f
+    end.sort.last
+    value && value  > 0 ? value : nil
+  end
+
+  def bse_sell_price
+    value = bse_scrape['market_depth'].select {|k,v| k.include?("SPrice")}.values.try(:map) do |v|
+      v.gsub(',', '').gsub('-','').to_f
+    end.sort.first
+    value && value > 0 ? value : nil
+  end
+
+  def fetch_nse_market
+    buy_price = nse_scrape['market_depth']['marketDeptOrderBook']['bid'].pluck('price').try(:map, &:to_f).sort.last
+    sell_price = nse_scrape['market_depth']['marketDeptOrderBook']['ask'].pluck('price').try(:map, &:to_f).sort.last
+    {
+      open: nse_scrape['open'].to_f,
+      close: nse_scrape['close'].to_f,
+      total_buy_order: nse_scrape['market_depth']['marketDeptOrderBook']['totalBuyQuantity'].to_i,
+      total_sell_order: nse_scrape['market_depth']['marketDeptOrderBook']['totalSellQuantity'].to_i,
+      buy_price: buy_price,
+      sell_price: sell_price,
+      buy_volume: nse_scrape['market_depth']['marketDeptOrderBook']['totalBuyQuantity'].to_i * buy_price.to_f,
+      sell_volume: nse_scrape['market_depth']['marketDeptOrderBook']['totalSellQuantity'].to_i * sell_price.to_f
+    }
   end
 end

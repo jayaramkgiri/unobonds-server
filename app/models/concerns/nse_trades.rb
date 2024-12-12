@@ -47,9 +47,11 @@ class NseTrades
   end
 
   def augment_response(response)
+    p "Building Trade Hash for #{response['data'].count}"
     trade_hash = {}
     response['data'].each do |d|
-      d['market_depth'] = fetch_market_depth(d['symbol'], 'series')
+      p "Fetching Market Depth of #{d['symbol']}-#{d['series']}"
+      d['market_depth'] = fetch_market_depth(d['symbol'], d['series'])
       trade_hash[d['meta']['isin']] = d
     end
     trade_hash

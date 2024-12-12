@@ -46,17 +46,20 @@ class BseTrades
 
   def format_trades
     @trades.each do |t|
-      @formatted_output[t['security_info']['ISSebiIsin']] = t
+      @formatted_output[t['security_name']] = t
     end
     @formatted_output
   end
 
   def fetch_last_page
     last_page_text = page.find(:css, 'table#ContentPlaceHolder1_GridViewrcdsFC').all('tr')[-1].all('td')[-1].text
+    if last_page_text == '...'
+      last_page_text = page.find(:css, 'table#ContentPlaceHolder1_GridViewrcdsFC').all('tr')[-1].all('td')[-2].text
+    end
     if last_page_text.to_i > 0
       last_page_text.to_i
     else
-      raise 'Error fetching Page count'
+      raise "Error fetching Page count ->#{e}"
     end
   end
 
@@ -89,7 +92,7 @@ class BseTrades
         trade[STANDARD_HEADERS.values[i]] = d.text.strip.present? ? d.text.strip : nil
       end
     end
-    trade['security_info'] = security_info(trade['security_code'])
+    # trade['security_info'] = security_info(trade['security_code'])
     trade['market_depth'] = market_depth(trade['security_code'])
     trade
   end

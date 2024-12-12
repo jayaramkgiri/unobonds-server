@@ -117,4 +117,65 @@ module ScripCrawlers
       fetch_nse_scrip(new_isins, retry_count + 1)
     end
   end
+
+  def find_and_update_bse_scrips(scrips)
+    bse_scrip_err = []
+    scrips.each do |scrip|
+      begin
+        search_url = "https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=DB&text=#{scrip.upcase}&flag=site"
+        search_response = Faraday.get(search_url) do |req|
+          req.headers['Accept'] = 'application/json, text/plain, */*'
+          req.headers['Accept-Encoding'] = 'gzip, deflate'
+          req.headers['If-Modified-Since'] = 'Thu, 28 Sep 2023 14:06:18 GMT'
+          req.headers['Sec-Ch-Ua'] = 'Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116'
+          req.headers['Sec-Ch-Ua-Platform'] = 'macOS'
+          req.headers['Sec-Fetch-Dest'] = 'empty'
+          req.headers['Sec-Fetch-Mode'] = 'cors'
+          req.headers['Sec-Fetch-Site'] = 'same-site'
+          req.headers['Origin'] = 'https://www.bseindia.com'
+          req.headers['Referer'] = 'https://www.bseindia.com/'
+          req.headers['Accept-Language'] = 'en-GB,en-US;q=0.9,en;q=0.8'
+          req.headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36'
+        end
+        if search_response.status == 200
+          body = decode_response_body(search_response)
+          doc = Nokogiri::HTML.parse(body)
+          if doc.search('a')[0].children[0].text == "No Match Found"
+            p "Not found -------- #{isin}"
+            nil
+          else
+            isin = doc.search('a')[0].children[2].children[1].text.gsub(" ", '')[0..11]
+            p "Success ----- #{isin} --- #{scrip}"
+            update_scrip_for_isin(isin, scrip)
+          end
+        else
+          p "Error fetching BSE scrip for #{scrip} -> #{e}"
+          bse_scrip_err << scrip
+        end
+        sleep(3)
+      rescue => e
+        p "Error fetching BSE scrip for #{scrip} -> #{e}"
+        bse_scrip_err << scrip
+      end
+    end
+      p bse_scrip_err
+  end
+
+  def decode_response_body(response)
+    if response["content-encoding"] == 'gzip'
+      Brotli.inflate(response.body)
+    else
+      response.body
+    end
+  end
+
+  def update_scrip_for_isin(isin, scrip)
+    iss = Issuance.where(isin: isin.upcase).first
+    if iss.present?
+      iss.update_attribute(:bse_scrip, scrip)
+      p "Updated Scrip #{scrip} for isin #{isin}"
+    else
+      p "Issuance not found for scrip #{scrip}"
+    end
+  end
 end
