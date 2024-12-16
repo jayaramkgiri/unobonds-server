@@ -52,6 +52,9 @@ class BseTrades
   end
 
   def fetch_last_page
+    if  page.find(:css, 'table#ContentPlaceHolder1_GridViewrcdsFC').all('tr')[-1].all('*').find {|child| child.tag_name == 'table'} == nil
+      return 1
+    end
     last_page_text = page.find(:css, 'table#ContentPlaceHolder1_GridViewrcdsFC').all('tr')[-1].all('td')[-1].text
     if last_page_text == '...'
       last_page_text = page.find(:css, 'table#ContentPlaceHolder1_GridViewrcdsFC').all('tr')[-1].all('td')[-2].text

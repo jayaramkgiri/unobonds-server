@@ -1,6 +1,7 @@
 class Market
   include Mongoid::Document
   include Mongoid::Timestamps
+  extend ScripCrawlers
 
   DENORMALIZED_FIELDS = [
   "cin",
@@ -17,7 +18,18 @@ class Market
   "latest_rating_agency",
   "latest_rating_date",
   "interest_frequency",
-  "principal_frequency"]   
+  "principal_frequency"]  
+  
+  MARKET_KEYS = [
+    :open,
+    :close,
+    :total_buy_order,
+    :total_sell_order,
+    :buy_price,
+    :sell_price,
+    :buy_volume,
+    :sell_volume,
+  ]
 
   field :date, type: Date
   field :version, type: Integer
@@ -59,6 +71,28 @@ class Market
 
     attr_accessor :latest_version
 
+    def poll_market
+      current_time = Time.now
+      market_start = Time.new(current_time.year, current_time.month, current_time.day, 9, 15)
+      market_end = Time.new(current_time.year, current_time.month, current_time.day, 15, 15)
+      if current_time > market_end
+        p "Market closed"
+        return
+      end
+      if current_time < market_start
+        until current_time < market_start 
+          p "Waiting for Market to open"
+          sleep(300)
+          current_time = Time.now
+        end
+      end
+      until current_time >= market_start && current_time <= market_end
+        update_marketdata
+        sleep(300)
+        current_time = Time.now
+      end
+    end
+
     def update_marketdata
       fetch_latest_version
       update_nse_data
@@ -66,7 +100,7 @@ class Market
     end
 
     def fetch_latest_version
-      @latest_version = Market.where(date: Date.today).distinct(:version).sort.last
+      @latest_version = Market.where(date: Date.today).distinct(:version).sort.last || 1
     end
 
     def update_bse_data
@@ -197,8 +231,23 @@ class Market
     else
       market = compare_market(fetch_bse_market, fetch_nse_market)
     end
+    format_market(market)
     market.keys.each do |k|
       self.send("#{k}=", market[k])
+    end
+  end
+
+  def format_market(market)
+    MARKET_KEYS.each do |key|
+      market[key] = nil if market[key] == 0
+    end
+    if market[:total_buy_order].nil?
+      market[:buy_volume] = nil
+      market[:buy_price] = nil
+    end
+    if market[:total_sell_order].nil?
+      market[:sell_volume] = nil
+      market[:sell_price] = nil
     end
   end
 
