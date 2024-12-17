@@ -86,7 +86,7 @@ class Market
           current_time = Time.now
         end
       end
-      until current_time >= market_start && current_time <= market_end
+      while current_time >= market_start && current_time <= market_end
         update_marketdata
         sleep(300)
         current_time = Time.now
@@ -95,7 +95,9 @@ class Market
 
     def update_marketdata
       fetch_latest_version
+      nse_init
       update_nse_data
+      bse_init
       update_bse_data
     end
 
@@ -103,8 +105,16 @@ class Market
       @latest_version = Market.where(date: Date.today).distinct(:version).sort.last || 1
     end
 
+    def bse_init
+      @bse_market ||= BseTrades.new
+    end
+
+    def nse_init
+      @nse_market ||= NseTrades.new
+    end
+
     def update_bse_data
-      bse_scrape = BseTrades.new.fetch_trade_list
+      bse_scrape = @bse_market.fetch_trade_list
       today = Date.today
       err_isins = []
       p "Updating BSE Scrape"
@@ -138,7 +148,7 @@ class Market
     end
 
     def update_nse_data
-      nse_scrape = NseTrades.new.fetch_trade_list
+      nse_scrape = @nse_market.fetch_trade_list
       today = Date.today
       err_isins = []
       p "Updating NSE Scrape"
