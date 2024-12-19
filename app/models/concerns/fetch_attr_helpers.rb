@@ -14,6 +14,8 @@ module FetchAttrHelpers
   def fetch_company_name
     if self.nsdl_data['ncd']['issuerName'].present? && (self.nse_data['Name of Issuer'].upcase.strip == self.nsdl_data['ncd']['issuerName'].upcase.strip)
       self.company_name = self.nse_data['Name of Issuer'].upcase.strip
+    elsif self.nsdl_data['ncd']['formerNameOne'].present? || self.nsdl_data['ncd']['formerNameTwo'].present? || self.nsdl_data['ncd']['formerNameThree'].present?
+      self.nsdl_data['ncd']['formerNameOne'] || self.nsdl_data['ncd']['formerNameTwo'] || self.nsdl_data['ncd']['formerNameThree']
     else
       raise 'Company name not found'
     end
