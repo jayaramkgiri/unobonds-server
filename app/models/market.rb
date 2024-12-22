@@ -87,14 +87,20 @@ class Market
         end
       end
       while current_time >= market_start && current_time <= market_end
-        update_marketdata
-        sleep(300)
-        current_time = Time.now
+        begin
+          p "Polling Market at #{Time.now.locale}"
+          update_marketdata
+          sleep(300)
+          current_time = Time.now
+        rescue => e
+          "Polling Failed with #{e}"
+        end
       end
     end
 
     def update_marketdata
       fetch_latest_version
+      p "Latest version #{@latest_version}"
       nse_init
       update_nse_data
       bse_init
@@ -149,6 +155,7 @@ class Market
 
     def update_nse_data
       nse_scrape = @nse_market.fetch_trade_list
+      return unless nse_scrape.present?
       today = Date.today
       err_isins = []
       p "Updating NSE Scrape"
@@ -159,6 +166,8 @@ class Market
           assign_iss_attributes(iss, market_entry) if market_entry.new_record?
           market_entry.version = latest_version + 1 unless market_entry.new_record?
           market_entry.nse_scrape = nse_scrape[iss.isin]
+          market_entry.populate_market
+          market_entry.populate_market_depth
           market_entry.save!
         rescue => e
           p "Failed to save NSE market data for #{iss.isin} -> #{e}"
