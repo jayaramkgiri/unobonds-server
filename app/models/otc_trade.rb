@@ -30,9 +30,15 @@ class OtcTrade
       if trades_already_exists?(date)
         p "Trades already pulled"
       else
+        p "Started BSE trades"
         pull_bse_trades(date)
+        p "BSE trades pulled"
+        p "Started NSE trades"
         pull_nse_trades(date)
+        p "NSE trades pulled"
+        p "Consolidating fields"
         update_top_fields(date)
+        p "Completed pulling OTC trades"
       end
     end
 

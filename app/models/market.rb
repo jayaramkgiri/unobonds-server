@@ -31,6 +31,8 @@ class Market
     :sell_volume,
   ]
 
+  HOLIDAYS_2025 = ["2025-02-26", "2025-03-14", "2025-03-31", "2025-04-10", "2025-04-14", "2025-04-18", "2025-05-01", "2025-08-15", "2025-08-27", "2025-10-02", "2025-10-21", "2025-10-22", "2025-11-05", "2025-12-25"]
+
   field :date, type: Date
   field :version, type: Integer
 
@@ -80,7 +82,7 @@ class Market
         return
       end
       if current_time < market_start
-        until current_time < market_start 
+        while current_time < market_start 
           p "Waiting for Market to open"
           sleep(300)
           current_time = Time.now
@@ -88,7 +90,7 @@ class Market
       end
       while current_time >= market_start && current_time <= market_end
         begin
-          p "Polling Market at #{Time.now.locale}"
+          p "Polling Market at #{Time.now}"
           update_marketdata
           sleep(300)
           current_time = Time.now
@@ -99,12 +101,16 @@ class Market
     end
 
     def update_marketdata
-      fetch_latest_version
-      p "Latest version #{@latest_version}"
-      nse_init
-      update_nse_data
-      bse_init
-      update_bse_data
+      begin
+        fetch_latest_version
+        p "Latest version #{@latest_version}"
+        nse_init
+        update_nse_data
+        bse_init
+        update_bse_data
+      rescue => e
+        "Polling Failed with #{e}"
+      end
     end
 
     def fetch_latest_version

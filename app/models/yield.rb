@@ -24,16 +24,21 @@ class Yield
   class << self
     def create_latest_yields(period)
       latest_trade_date = OtcTrade.latest_trade_date
-      return if self.where(calculated_date: latest_trade_date).count > 0
-      TENOR_BUCKETS.keys.each do |tenor|
-        self.create(
-            calculated_date: latest_trade_date,
-            tenor_bucket: tenor,
-            a_yield: calculate_yield(A_RATING, tenor, period),
-            aa_yield: calculate_yield(AA_RATING, tenor, period),
-            aaa_yield: calculate_yield(AAA_RATING, tenor, period),
-            bbb_yield: calculate_yield(BBB_RATING, tenor, period)
-          )
+      if self.where(calculated_date: latest_trade_date).count > 0
+        p "Latest Yield already exists"
+      else
+        p "Calculating Yields" 
+        TENOR_BUCKETS.keys.each do |tenor|
+          self.create(
+              calculated_date: latest_trade_date,
+              tenor_bucket: tenor,
+              a_yield: calculate_yield(A_RATING, tenor, period),
+              aa_yield: calculate_yield(AA_RATING, tenor, period),
+              aaa_yield: calculate_yield(AAA_RATING, tenor, period),
+              bbb_yield: calculate_yield(BBB_RATING, tenor, period)
+            )
+        end
+        p "Created latest Yield record" 
       end
     end
 
