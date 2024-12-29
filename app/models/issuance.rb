@@ -42,6 +42,16 @@ class Issuance
 
   belongs_to :company, foreign_key: 'cin', optional: true
 
+  scope :tradable_issuances, -> {where(:bse_scrip.ne => nil).or( Issuance.where(:nse_scrip.ne => nil))}
+  scope :fixed_interest_issuances, -> {where(coupon_basis:  "Fixed Interest" )}
+  scope :get_all_isins, -> (isins) {where(:isin.in => isins)}
+
+
+  class << self
+    def find_by_isin(isin)
+      where(isin: isin).first
+    end
+  end
 
 end
 

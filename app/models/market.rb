@@ -73,33 +73,6 @@ class Market
 
     attr_accessor :latest_version
 
-    def poll_market
-      current_time = Time.now
-      market_start = Time.new(current_time.year, current_time.month, current_time.day, 9, 15)
-      market_end = Time.new(current_time.year, current_time.month, current_time.day, 15, 15)
-      if current_time > market_end
-        p "Market closed"
-        return
-      end
-      if current_time < market_start
-        while current_time < market_start 
-          p "Waiting for Market to open"
-          sleep(300)
-          current_time = Time.now
-        end
-      end
-      while current_time >= market_start && current_time <= market_end
-        begin
-          p "Polling Market at #{Time.now}"
-          update_marketdata
-          sleep(300)
-          current_time = Time.now
-        rescue => e
-          "Polling Failed with #{e}"
-        end
-      end
-    end
-
     def update_marketdata
       begin
         fetch_latest_version
@@ -133,10 +106,9 @@ class Market
       fix_bse_missing_scrips(bse_scrape.keys)
       Issuance.where(:bse_scrip.in => bse_scrape.keys.compact).each do |iss|
         begin
-          market_entry = Market.where(isin: iss.isin, date: today).first
-          market_entry = Market.new(isin: iss.isin, date: today) unless market_entry.present?
-          assign_iss_attributes(iss, market_entry) if market_entry.new_record?
-          market_entry.version = latest_version + 1 unless market_entry.new_record?
+          # market_entry = Market.where(isin: iss.isin, date: today).first
+          market_entry = Market.new(isin: iss.isin, date: today, version: latest_version + 1)
+          assign_iss_attributes(iss, market_entry)
           market_entry.bse_scrape = bse_scrape[iss.bse_scrip]
           market_entry.populate_market
           market_entry.populate_market_depth
@@ -167,10 +139,8 @@ class Market
       p "Updating NSE Scrape"
       Issuance.where(:isin.in => nse_scrape.keys.compact).each do |iss|
         begin
-          market_entry = Market.where(isin: iss.isin, date: today).first
-          market_entry = Market.new(isin: iss.isin, date: today) unless market_entry.present?
-          assign_iss_attributes(iss, market_entry) if market_entry.new_record?
-          market_entry.version = latest_version + 1 unless market_entry.new_record?
+          market_entry = Market.new(isin: iss.isin, date: today, version: latest_version + 1 )
+          assign_iss_attributes(iss, market_entry)
           market_entry.nse_scrape = nse_scrape[iss.isin]
           market_entry.populate_market
           market_entry.populate_market_depth
