@@ -26,19 +26,19 @@ class OtcTrade
     end
 
 
-    def pull_trades(date = Date.yesterday)
+    def pull_trades(date = Date.today)
       if trades_already_exists?(date)
         p "Trades already pulled"
       else
         p "Started BSE trades"
-        pull_bse_trades(date)
-        p "BSE trades pulled"
+        bse= pull_bse_trades(date)
         p "Started NSE trades"
-        pull_nse_trades(date)
-        p "NSE trades pulled"
-        p "Consolidating fields"
-        update_top_fields(date)
-        p "Completed pulling OTC trades"
+        nse = pull_nse_trades(date)
+        if bse && nse
+          p "Consolidating fields"
+          update_top_fields(date)
+          p "Completed pulling OTC trades"
+        end
       end
     end
 
@@ -69,8 +69,11 @@ class OtcTrade
           ISSUANCE_FIELDS.each {|f| iss.send("#{f}=", issue[f])}
           iss.save!
         end
+        p "BSE trades pulled"
+        true
       rescue => e
         p "Error fetching BSE trades --> #{e}"
+        false
       end
     end
 
@@ -96,8 +99,11 @@ class OtcTrade
           end
           iss.save!
         end
+        p "NSE trades pulled"
+        true
       rescue => e
         p "Error fetching NSE trades --> #{e}"
+        false
       end
     end
 

@@ -18,7 +18,10 @@ class Market
   "latest_rating_agency",
   "latest_rating_date",
   "interest_frequency",
-  "principal_frequency"]  
+  "principal_frequency",
+  "bse_scrip",
+  "nse_scrip"
+]  
   
   MARKET_KEYS = [
     :open,
@@ -32,6 +35,7 @@ class Market
   ]
 
   HOLIDAYS_2025 = ["2025-02-26", "2025-03-14", "2025-03-31", "2025-04-10", "2025-04-14", "2025-04-18", "2025-05-01", "2025-08-15", "2025-08-27", "2025-10-02", "2025-10-21", "2025-10-22", "2025-11-05", "2025-12-25"]
+  HOLIDAYS_2024 = ["2024-01-26", "2024-03-08", "2024-03-25", "2024-03-29", "2024-04-11", "2024-04-17", "2024-05-01", "2024-05-20", "2024-06-17", "2024-07-17", "2024-08-15", "2024-10-02", "2024-11-01", "2024-11-15", "2024-12-25"] 
 
   field :date, type: Date
   field :version, type: Integer
@@ -71,8 +75,6 @@ class Market
 
   class << self
 
-    attr_accessor :latest_version
-
     def update_marketdata
       begin
         fetch_latest_version
@@ -87,7 +89,7 @@ class Market
     end
 
     def fetch_latest_version
-      @latest_version = Market.where(date: Date.today).distinct(:version).sort.last || 1
+      @latest_version = Market.where(date: Date.today).distinct(:version).sort.last || 0
     end
 
     def bse_init
@@ -107,7 +109,8 @@ class Market
       Issuance.where(:bse_scrip.in => bse_scrape.keys.compact).each do |iss|
         begin
           # market_entry = Market.where(isin: iss.isin, date: today).first
-          market_entry = Market.new(isin: iss.isin, date: today, version: latest_version + 1)
+          market_entry = Market.new(isin: iss.isin, date: today)
+          market_entry.version = @latest_version + 1
           assign_iss_attributes(iss, market_entry)
           market_entry.bse_scrape = bse_scrape[iss.bse_scrip]
           market_entry.populate_market
@@ -139,7 +142,8 @@ class Market
       p "Updating NSE Scrape"
       Issuance.where(:isin.in => nse_scrape.keys.compact).each do |iss|
         begin
-          market_entry = Market.new(isin: iss.isin, date: today, version: latest_version + 1 )
+          market_entry = Market.new(isin: iss.isin, date: today)
+          market_entry.version = @latest_version + 1
           assign_iss_attributes(iss, market_entry)
           market_entry.nse_scrape = nse_scrape[iss.isin]
           market_entry.populate_market
@@ -162,7 +166,16 @@ class Market
         iss_value = iss.send(f)
         market_entry.send("#{f}=", iss_value)
       end
-      market_entry.version = 1
+    end
+
+    def working_days_of_month(year, month)
+      # Get all days of the month
+      holidays = Market.const_get("HOLIDAYS_#{year}").map(&:to_date)
+      days_in_month = (Date.new(year, month)..Date.new(year, month, -1)).to_a
+    
+      # Filter out Saturdays and Sundays
+      working_days = days_in_month.reject { |date| date.saturday? || date.sunday? ||  holidays.include?(date)}
+      working_days
     end
   end
 
